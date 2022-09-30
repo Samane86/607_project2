@@ -1,0 +1,389 @@
+---
+title: "607_project2"
+author: "Samane Khademi"
+date: "2022-09-30"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Link to [Github](https://github.com/Samane86/607_project2)
+## Link to [RPubs](https://rpubs.com/Samane65/949533)
+
+
+
+
+# Load libraies:
+```{r}
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(readr)
+```
+
+
+# Data set 1:
+
+Data can be found [here](https://raw.githubusercontent.com/Samane86/607_project2/main/agcensus-chapter1-table1-US.csv)
+
+
+```{r}
+df1 <- read.csv("https://raw.githubusercontent.com/Samane86/607_project2/main/agcensus-chapter1-table1-US.csv")
+df1 <- data.frame(df1)
+
+```
+
+
+Let's take a look at our data:
+
+```{r}
+glimpse(df1)
+
+```
+
+```{r}
+head(df1)
+```
+
+I want to see how many categories column state has:
+
+```{r}
+df1 %>% 
+  count(state)
+```
+
+It seems that there is just one value repeated all along the column.
+
+```{r}
+df1 %>% 
+  count(commodity)
+```
+
+This data set has a lot of information, I am going to pare it down to some of the produce items in order to practice the pivot commands more effectively. If we wanted to work with the data set, it would be easy enough to repeat the similar steps for the rest of the data in this file.
+
+```{r}
+produce <- df1 %>%
+  filter(commodity %in% c("OATS", "BARLEY",
+                          "SOYBEANS", "BEANS", "COTTON", "TOBACCO", 
+                          "HAY & HAYLAGE", "RICE", "SUNFLOWER", 
+                          "SUGARBEETS", "SUGARCANE", "PEANUTS",
+                          "POTATOES", "SWEET POTATOES"))
+```
+
+
+Let's pick up some columns, because some of columns contain just category, So they do not add any knowledge to our analysis.
+
+```{r}
+produce <- produce %>% 
+  select(c("commodity", "data.item", "X2017", "X2012",
+           "X2007", "X2002", "X1997"))
+
+```
+
+```{r}
+head(produce)
+```
+
+
+## Missing values:
+
+Do we have NULL values?
+
+
+```{r}
+colSums(is.na(produce))
+```
+So we don't have missing values.
+
+I want to rename some of the columns name to make more sense:
+
+```{r}
+produce <- produce %>% 
+  rename("2017" = "X2017" , "2012"= "X2012" , "2007" = "X2007", "2002" = "X2002",
+         "1997" = "X1997")
+```
+
+```{r}
+produce %>% 
+  count(data.item)
+```
+
+I am interested to make the table wide and have data.item as columns, but this columns have lots of categories, In fact all rows in this column are distinct values, I want to unite them based on three categories: "OPERATIONS WITH AREA HARVESTED" , "ACRES HARVESTED", "PRODUCTION"
+
+```{r}
+produce <- mutate_if(
+  tibble::as_tibble(produce), 
+  is.character, 
+  stringr ::str_replace_all, pattern = ".*OPERATIONS.*", 
+  replacement = "OPERATIONS_WITH_AREA_HARVESTED")
+
+produce <- mutate_if(
+  tibble::as_tibble(produce), 
+  is.character, 
+  stringr ::str_replace_all, pattern = ".*ACRES.*", 
+  replacement = "ACRES_HARVESTED")
+
+
+produce <- mutate_if(
+  tibble::as_tibble(produce), 
+  is.character, 
+  stringr ::str_replace_all, pattern = ".*PRODUCTION.*", 
+  replacement =  "PRODUCTION")
+```
+
+
+
+Now I want to make all  years columns into just one column and name it year:
+
+
+```{r}
+produce <- produce  %>% 
+  pivot_longer(!c(commodity,data.item), names_to = "year", values_to = "value" )
+
+```
+
+
+```{r}
+produce <- produce %>% 
+  pivot_wider(names_from = data.item, values_from = "value")
+
+```
+
+```{r}
+produce
+```
+
+
+I tried to convert the numbers in columns 3,4 and 5 to numeric, But I countered a problem, All of the data in these 3 columns converted to NA, Here i noticed that whereas I run the function colSums(is.na(produce)) and the results indicated that there is no NA values, But there was blank cells(Implicit missing values). So I have to mutate the blank cells to NA and then deal with missing values:
+
+
+```{r}
+produce <- produce %>%
+  mutate(across(c("OPERATIONS_WITH_AREA_HARVESTED","ACRES_HARVESTED","PRODUCTION"), ~ifelse(.=="", NA, as.character(.))))
+
+```
+
+Also in one column we had a cell with a value of : "(D)"
+So I tried to mutate it to NA:
+
+```{r}
+produce <- produce %>% 
+  mutate(across(c("OPERATIONS_WITH_AREA_HARVESTED","ACRES_HARVESTED","PRODUCTION"), na_if, "(D)"))
+```
+
+
+
+Here I tried to convert the last three columns values to numeric, They were comma separated numbers so I used parse_number function from readr package:
+
+
+```{r}
+produce <- produce%>% 
+  mutate_at(3:5, readr::parse_number)
+```
+
+
+
+
+Now we have Na values and we have to decide how we want to treat them. Let's take a look at the distribution of data point for column OPERATIONS_WITH_AREA_HARVESTED:
+
+```{r}
+hist(produce$OPERATIONS_WITH_AREA_HARVESTED, na.rm=TRUE)
+```
+
+
+```{r}
+
+hist(produce$ACRES_HARVESTED, na.rm=TRUE)
+```
+
+```{r}
+hist(produce$PRODUCTION, na.rm=TRUE)
+```
+
+As we can see these three distributions are highly right skewed and mean of the values in this columns are going to be very affected by this outlines.
+So imputing null values with the mean of the column is not going to be a good idea. By eyeballing these columns, I think imputing NA values with the nearest neighbor value using fill function is a good idea:
+
+```{r}
+produce <- produce %>% 
+  fill(3:5, .direction = "up")
+```
+
+
+```{r}
+produce <- produce %>% 
+  fill(PRODUCTION, .direction = "down")
+
+```
+
+
+```{r}
+head(produce)
+```
+
+We now have the produce data arranged in a “tidy” format, where each row corresponds to a specific measurement and each column corresponds to a single variable.
+
+
+
+# DATASET 2
+
+Data can be found [here](https://raw.githubusercontent.com/Samane86/607_project2/main/StudentsPerformance.csv)
+
+# Loading data:
+
+```{r}
+
+df2 <- read.csv("https://raw.githubusercontent.com/Samane86/607_project2/main/StudentsPerformance.csv")
+df2 <- data.frame(df2)
+
+```
+
+
+
+How our data looks like:
+```{r}
+glimpse(df1)
+```
+
+```{r}
+head(df2)
+```
+
+I prefer to change the columns name:
+
+```{r}
+df2 <- df2 %>% 
+  rename(race = race.ethnicity, parent.LOE = parental.level.of.education, test_prep = test.preparation.course,
+         math = math.score, reading = reading.score, writing = writing.score)
+```
+
+
+## Missing values:
+
+Do we have NA values?
+
+```{r}
+colSums(is.na(df2))
+```
+
+How many categories does parental level of education have?
+
+```{r}
+table(df2$parent.LOE)
+```
+
+
+I want to have all three subject's score as an Average and store it in a new column and arrange them in Descendingorder of average:
+
+```{r}
+df2 <- df2 %>% 
+  mutate(avg = round((math+reading+writing)/3 , 1)) %>% 
+  select(-c(math, reading, writing)) %>% 
+  arrange(desc(avg))
+```
+
+
+# plot 
+
+```{r}
+ggplot(df2, aes(x = parent.LOE, y = avg)) +
+  geom_boxplot() +
+  coord_flip() +
+  ggtitle("Distributions of Avg Scores")
+```
+
+
+
+```{r}
+ggplot(df2, aes(gender, avg, color = test_prep)) +
+  geom_boxplot() + 
+  ggtitle("Avg scores by Gender Boxplot") + 
+  xlab("Gender") + ylab("Avg Scores")
+
+```
+
+
+
+
+# Dataset3:
+
+In 2013, students of the Statistics class at FSEV UK were asked to rate how much they like each one of 39 paintings (on a scale from 1 to 5). 
+These comprise of 13 different art movements (exactly 3 paintings for each art movement).
+
+S1-S48: students' ratings, where one means "don't like at all" (integer)
+art movement: the art movement the painting belongs to (categorical)
+artist: the author of the painting (categorical)
+painting: the name of the painting (categorical)
+
+
+### Data can be found [here](https://raw.githubusercontent.com/Samane86/607_project2/main/paintings.csv)
+
+# Loading data:
+
+```{r}
+paintings <- as_tibble (read.csv("https://raw.githubusercontent.com/Samane86/607_project2/main/paintings.csv"))
+
+```
+
+
+Taking a look at our data:
+
+```{r}
+str(paintings)
+
+```
+
+
+```{r}
+head(paintings)
+```
+
+The paintings data set has 51 columns where the 48 student rankings are each separate columns. 
+
+Combine the 48 student rating columns into one column creating a long data set.
+Combine the 48 student rating columns into one or more summary column, i.e. the average of all rankings, etc.
+
+```{r}
+options(dplyr.summarise.inform = FALSE)
+```
+
+```{r}
+paintings <- paintings%>%
+  pivot_longer(starts_with("s"), names_to = "student", values_to = "rating") %>%  
+  group_by(art.movement, artist, painting) %>%
+  summarise(avg = round(mean(rating),2)) %>% 
+  arrange(desc(avg))
+
+```
+
+```{r}
+head(paintings,10)
+```
+
+It seems that the painting "Four Seasons" was the most popular piece among students.
+
+
+Let's see how is the plot of popularity of artists:
+
+```{r}
+#Mean by artist
+ggplot(paintings , aes(artist, fill = artist, avg)) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x=element_blank(),
+         axis.ticks.x=element_blank()) + labs(x= "Artist",y= "Mean" , title = "Artist Mean Score")
+```
+
+
+```{r}
+ggplot(paintings, aes(art.movement, fill = art.movement,avg)) + geom_bar(stat = "identity")+ 
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank()) + labs(x= "Art Movement",y= "Mean Score" , title = "Mean Score per Art Movement")+
+    guides(fill=guide_legend(title="Art Movement"))
+```
+
+
+
